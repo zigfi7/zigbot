@@ -93,6 +93,7 @@ const DEFAULT_SUBAGENT_TOOL_DENY = [
   // Memory - pass relevant info in spawn prompt instead
   "memory_search",
   "memory_get",
+  "memory_save",
 ];
 
 export function resolveSubagentToolPolicy(cfg?: OpenClawConfig): SandboxToolPolicy {

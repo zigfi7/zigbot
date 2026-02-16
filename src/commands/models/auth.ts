@@ -158,6 +158,43 @@ export async function modelsAuthPasteTokenCommand(
   runtime.log(`Auth profile: ${profileId} (${provider}/token)`);
 }
 
+export async function modelsAuthPasteApiKeyCommand(
+  opts: {
+    provider?: string;
+    profileId?: string;
+  },
+  runtime: RuntimeEnv,
+) {
+  const rawProvider = opts.provider?.trim();
+  if (!rawProvider) {
+    throw new Error("Missing --provider.");
+  }
+  const provider = normalizeProviderId(rawProvider);
+  const profileId = opts.profileId?.trim() || `${provider}:default`;
+
+  const keyInput = await text({
+    message: `Paste API key for ${provider}`,
+    validate: (value) => (value?.trim() ? undefined : "Required"),
+  });
+  const key = String(keyInput).trim();
+
+  upsertAuthProfile({
+    profileId,
+    credential: {
+      type: "api_key",
+      provider,
+      key,
+    },
+  });
+
+  await updateConfig((cfg) =>
+    applyAuthProfileConfig(cfg, { profileId, provider, mode: "api_key" }),
+  );
+
+  logConfigUpdated(runtime);
+  runtime.log(`Auth profile: ${profileId} (${provider}/api_key)`);
+}
+
 export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime: RuntimeEnv) {
   const provider = (await select({
     message: "Token provider",

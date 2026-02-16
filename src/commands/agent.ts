@@ -12,12 +12,17 @@ import { clearSessionAuthProfileOverride } from "../agents/auth-profiles/session
 import { runCliAgent } from "../agents/cli-runner.js";
 import { getCliSessionId } from "../agents/cli-session.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { runLlmwsAgent } from "../agents/llmws-runner.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import { runWithModelFallback } from "../agents/model-fallback.js";
+import { resolvePooledModelRoute } from "../agents/model-routing.js";
 import {
   buildAllowedModelSet,
+  isExternalRunnerProvider,
   isCliProvider,
+  isLlmwsProvider,
   modelKey,
+  normalizeProviderId,
   resolveConfiguredModelRef,
   resolveThinkingDefault,
 } from "../agents/model-selection.js";
@@ -285,7 +290,7 @@ export async function agentCommand(
       if (overrideModel) {
         const key = modelKey(overrideProvider, overrideModel);
         if (
-          !isCliProvider(overrideProvider, cfg) &&
+          !isExternalRunnerProvider(overrideProvider, cfg) &&
           allowedModelKeys.size > 0 &&
           !allowedModelKeys.has(key)
         ) {
@@ -309,7 +314,7 @@ export async function agentCommand(
       const candidateProvider = storedProviderOverride || defaultProvider;
       const key = modelKey(candidateProvider, storedModelOverride);
       if (
-        isCliProvider(candidateProvider, cfg) ||
+        isExternalRunnerProvider(candidateProvider, cfg) ||
         allowedModelKeys.size === 0 ||
         allowedModelKeys.has(key)
       ) {
@@ -365,6 +370,25 @@ export async function agentCommand(
         });
       }
     }
+    const sessionProviderForAuth = provider;
+    const routedModel = resolvePooledModelRoute({
+      cfg,
+      agentId: sessionAgentId,
+      prompt: body,
+      currentProvider: provider,
+      currentModel: model,
+      thinkLevel: resolvedThinkLevel,
+      imagesCount: opts.images?.length ?? 0,
+      allowCurrentModelOverride:
+        !storedModelOverride &&
+        !storedProviderOverride &&
+        normalizeProviderId(provider) === normalizeProviderId(defaultProvider) &&
+        model.trim() === defaultModel.trim(),
+    });
+    if (routedModel) {
+      provider = routedModel.provider;
+      model = routedModel.model;
+    }
     const sessionFile = resolveSessionFilePath(sessionId, sessionEntry, {
       agentId: sessionAgentId,
     });
@@ -410,8 +434,31 @@ export async function agentCommand(
               streamParams: opts.streamParams,
             });
           }
+          if (isLlmwsProvider(providerOverride)) {
+            const remoteSessionId = getCliSessionId(sessionEntry, providerOverride);
+            return runLlmwsAgent({
+              sessionId,
+              remoteSessionId,
+              sessionKey,
+              agentId: sessionAgentId,
+              sessionFile,
+              workspaceDir,
+              config: cfg,
+              prompt: body,
+              provider: providerOverride,
+              model: modelOverride,
+              thinkLevel: resolvedThinkLevel,
+              timeoutMs,
+              runId,
+              extraSystemPrompt: opts.extraSystemPrompt,
+              streamParams: opts.streamParams,
+              images: opts.images,
+            });
+          }
           const authProfileId =
-            providerOverride === provider ? sessionEntry?.authProfileOverride : undefined;
+            providerOverride === sessionProviderForAuth
+              ? sessionEntry?.authProfileOverride
+              : undefined;
           return runEmbeddedPiAgent({
             sessionId,
             sessionKey,

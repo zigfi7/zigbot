@@ -1,12 +1,13 @@
 import type { SessionSendPolicyConfig } from "./types.base.js";
 
-export type MemoryBackend = "builtin" | "qmd";
+export type MemoryBackend = "builtin" | "qmd" | "zigmem";
 export type MemoryCitationsMode = "auto" | "on" | "off";
 
 export type MemoryConfig = {
   backend?: MemoryBackend;
   citations?: MemoryCitationsMode;
   qmd?: MemoryQmdConfig;
+  zigmem?: MemoryZigmemConfig;
 };
 
 export type MemoryQmdConfig = {
@@ -47,4 +48,21 @@ export type MemoryQmdLimitsConfig = {
   maxSnippetChars?: number;
   maxInjectedChars?: number;
   timeoutMs?: number;
+};
+
+export type MemoryZigmemConfig = {
+  /** Base URL for ZigMem API (e.g. http://127.0.0.1:8000). */
+  baseUrl?: string;
+  /** Optional bearer token (sent as Authorization header). */
+  apiKey?: string;
+  /** Optional additional headers for ZigMem requests. */
+  headers?: Record<string, string>;
+  /** Request timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Default ZigMem search mode. */
+  mode?: "lexical" | "semantic" | "hybrid";
+  /** Default max results per query. */
+  maxResults?: number;
+  /** Prefix for synthetic file paths exposed to memory_get. */
+  pathPrefix?: string;
 };

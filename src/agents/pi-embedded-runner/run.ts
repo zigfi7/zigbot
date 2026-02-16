@@ -10,6 +10,7 @@ import {
   markAuthProfileFailure,
   markAuthProfileGood,
   markAuthProfileUsed,
+  resolveAuthProfileFailureReasonForRotation,
 } from "../auth-profiles.js";
 import {
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
@@ -19,6 +20,10 @@ import {
 } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
+import {
+  buildPromptWithMemoryInjection,
+  resolveZigmemMemoryInjection,
+} from "../memory-injection.js";
 import {
   ensureAuthProfileStore,
   getApiKeyForModel,
@@ -388,13 +393,26 @@ export async function runEmbeddedPiAgent(
       let toolResultTruncationAttempted = false;
       const usageAccumulator = createUsageAccumulator();
       let autoCompactionCount = 0;
+      const memoryInjection = await resolveZigmemMemoryInjection({
+        cfg: params.config,
+        agentId: workspaceResolution.agentId,
+        sessionKey: params.sessionKey,
+        query: params.prompt,
+        maxResultsEnvVars: ["OPENCLAW_MEMORY_INJECTION_MAX_RESULTS"],
+        maxCharsEnvVars: ["OPENCLAW_MEMORY_INJECTION_MAX_CHARS"],
+        logContext: "embedded",
+      });
       try {
         while (true) {
           attemptedThinking.add(thinkLevel);
           await fs.mkdir(resolvedWorkspace, { recursive: true });
 
-          const prompt =
+          const basePrompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
+          const prompt = buildPromptWithMemoryInjection({
+            prompt: basePrompt,
+            injection: memoryInjection,
+          });
 
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
@@ -580,7 +598,7 @@ export async function runEmbeddedPiAgent(
                 {
                   text:
                     "Context overflow: prompt too large for the model. " +
-                    "Try again with less input or a larger-context model.",
+                    "Try /reset (or /new) to start a fresh session, or use a larger-context model.",
                   isError: true,
                 },
               ],
@@ -655,7 +673,10 @@ export async function runEmbeddedPiAgent(
               await markAuthProfileFailure({
                 store: authStore,
                 profileId: lastProfileId,
-                reason: promptFailoverReason,
+                reason: resolveAuthProfileFailureReasonForRotation({
+                  reason: promptFailoverReason,
+                  errorMessage: errorText,
+                }),
                 cfg: params.config,
                 agentDir: params.agentDir,
               });
@@ -736,14 +757,17 @@ export async function runEmbeddedPiAgent(
 
           if (shouldRotate) {
             if (lastProfileId) {
-              const reason =
+              const reason: FailoverReason =
                 timedOut || assistantFailoverReason === "timeout"
                   ? "timeout"
                   : (assistantFailoverReason ?? "unknown");
               await markAuthProfileFailure({
                 store: authStore,
                 profileId: lastProfileId,
-                reason,
+                reason: resolveAuthProfileFailureReasonForRotation({
+                  reason,
+                  errorMessage: lastAssistant?.errorMessage ?? "",
+                }),
                 cfg: params.config,
                 agentDir: params.agentDir,
               });

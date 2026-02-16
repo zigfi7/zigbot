@@ -52,6 +52,11 @@ function buildMemorySection(params: {
     "## Memory Recall",
     "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
   ];
+  if (params.availableTools.has("memory_save")) {
+    lines.push(
+      "To store durable facts or user preferences for later: use memory_save with a short, factual entry (avoid secrets).",
+    );
+  }
   if (params.citationsMode === "off") {
     lines.push(
       "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.",
@@ -87,7 +92,7 @@ function buildReplyTagsSection(isMinimal: boolean) {
     "## Reply Tags",
     "To request a native reply/quote on supported surfaces, include one tag in your reply:",
     "- [[reply_to_current]] replies to the triggering message.",
-    "- [[reply_to:<id>]] replies to a specific message id when you have it.",
+    "- Prefer [[reply_to_current]]. Use [[reply_to:<id>]] only when an id was explicitly provided (e.g. by the user or a tool).",
     "Whitespace inside the tag is allowed (e.g. [[ reply_to_current ]] / [[ reply_to: 123 ]]).",
     "Tags are stripped before sending; support depends on the current channel config.",
     "",
@@ -171,6 +176,7 @@ export function buildAgentSystemPrompt(params: {
   toolNames?: string[];
   toolSummaries?: Record<string, string>;
   modelAliasLines?: string[];
+  modelCapabilityLines?: string[];
   userTimezone?: string;
   userTime?: string;
   userTimeFormat?: ResolvedTimeFormat;
@@ -446,6 +452,19 @@ export function buildAgentSystemPrompt(params: {
       ? params.modelAliasLines.join("\n")
       : "",
     params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal ? "" : "",
+    params.modelCapabilityLines && params.modelCapabilityLines.length > 0 && !isMinimal
+      ? "## Model/Server Capabilities"
+      : "",
+    params.modelCapabilityLines && params.modelCapabilityLines.length > 0 && !isMinimal
+      ? "Use this list when choosing model overrides or sub-agents for a task."
+      : "",
+    params.modelCapabilityLines && params.modelCapabilityLines.length > 0 && !isMinimal
+      ? "If you need to switch the current session model, use session_status(model=<alias|provider/model>)."
+      : "",
+    params.modelCapabilityLines && params.modelCapabilityLines.length > 0 && !isMinimal
+      ? params.modelCapabilityLines.join("\n")
+      : "",
+    params.modelCapabilityLines && params.modelCapabilityLines.length > 0 && !isMinimal ? "" : "",
     userTimezone
       ? "If you need the current date, time, or day of week, run session_status (📊 session_status)."
       : "",
@@ -638,9 +657,11 @@ export function buildRuntimeLine(
     runtimeInfo?.defaultModel ? `default_model=${runtimeInfo.defaultModel}` : "",
     runtimeInfo?.shell ? `shell=${runtimeInfo.shell}` : "",
     runtimeChannel ? `channel=${runtimeChannel}` : "",
-    runtimeChannel
-      ? `capabilities=${runtimeCapabilities.length > 0 ? runtimeCapabilities.join(",") : "none"}`
-      : "",
+    runtimeCapabilities.length > 0
+      ? `capabilities=${runtimeCapabilities.join(",")}`
+      : runtimeChannel
+        ? "capabilities=none"
+        : "",
     `thinking=${defaultThinkLevel ?? "off"}`,
   ]
     .filter(Boolean)

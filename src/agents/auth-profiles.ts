@@ -38,3 +38,4 @@ export {
   markAuthProfileUsed,
   resolveProfileUnusableUntilForDisplay,
 } from "./auth-profiles/usage.js";
+export { resolveAuthProfileFailureReasonForRotation } from "./auth-profiles/rotation.js";

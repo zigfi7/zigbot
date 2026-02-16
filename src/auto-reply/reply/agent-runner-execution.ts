@@ -8,8 +8,15 @@ import type { TypingSignaler } from "./typing-mode.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { runCliAgent } from "../../agents/cli-runner.js";
 import { getCliSessionId } from "../../agents/cli-session.js";
+import { runLlmwsAgent } from "../../agents/llmws-runner.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
-import { isCliProvider } from "../../agents/model-selection.js";
+import { resolvePooledModelRoute } from "../../agents/model-routing.js";
+import {
+  isCliProvider,
+  isLlmwsProvider,
+  normalizeProviderId,
+  resolveDefaultModelForAgent,
+} from "../../agents/model-selection.js";
 import {
   isCompactionFailureError,
   isContextOverflowError,
@@ -127,7 +134,9 @@ export async function runAgentTurnWithFallback(params: {
         if (!text) {
           return { skip: true };
         }
-        const sanitized = sanitizeUserFacingText(text);
+        const sanitized = sanitizeUserFacingText(text, {
+          errorContext: Boolean(payload.isError),
+        });
         if (!sanitized.trim()) {
           return { skip: true };
         }
@@ -143,10 +152,30 @@ export async function runAgentTurnWithFallback(params: {
       };
       const blockReplyPipeline = params.blockReplyPipeline;
       const onToolResult = params.opts?.onToolResult;
+      const currentProvider = params.followupRun.run.provider;
+      const currentModel = params.followupRun.run.model;
+      const defaultModelRef = resolveDefaultModelForAgent({
+        cfg: params.followupRun.run.config ?? {},
+        agentId: params.followupRun.run.agentId,
+      });
+      const routedModel = resolvePooledModelRoute({
+        cfg: params.followupRun.run.config,
+        agentId: params.followupRun.run.agentId,
+        prompt: params.commandBody,
+        currentProvider,
+        currentModel,
+        thinkLevel: params.followupRun.run.thinkLevel,
+        imagesCount: params.opts?.images?.length ?? 0,
+        allowCurrentModelOverride:
+          normalizeProviderId(currentProvider) === normalizeProviderId(defaultModelRef.provider) &&
+          currentModel.trim() === defaultModelRef.model.trim(),
+      });
+      const providerForRun = routedModel?.provider ?? currentProvider;
+      const modelForRun = routedModel?.model ?? currentModel;
       const fallbackResult = await runWithModelFallback({
         cfg: params.followupRun.run.config,
-        provider: params.followupRun.run.provider,
-        model: params.followupRun.run.model,
+        provider: providerForRun,
+        model: modelForRun,
         agentDir: params.followupRun.run.agentDir,
         fallbacksOverride: resolveAgentModelFallbacksOverride(
           params.followupRun.run.config,
@@ -243,6 +272,89 @@ export async function runAgentTurnWithFallback(params: {
                       startedAt,
                       endedAt: Date.now(),
                       error: "CLI run completed without lifecycle terminal event",
+                    },
+                  });
+                }
+              }
+            })();
+          }
+          if (isLlmwsProvider(provider)) {
+            const startedAt = Date.now();
+            emitAgentEvent({
+              runId,
+              stream: "lifecycle",
+              data: {
+                phase: "start",
+                startedAt,
+              },
+            });
+            return (async () => {
+              let lifecycleTerminalEmitted = false;
+              try {
+                const remoteSessionId = getCliSessionId(params.getActiveSessionEntry(), provider);
+                const result = await runLlmwsAgent({
+                  sessionId: params.followupRun.run.sessionId,
+                  remoteSessionId,
+                  sessionKey: params.sessionKey,
+                  agentId: params.followupRun.run.agentId,
+                  sessionFile: params.followupRun.run.sessionFile,
+                  workspaceDir: params.followupRun.run.workspaceDir,
+                  config: params.followupRun.run.config,
+                  prompt: params.commandBody,
+                  provider,
+                  model,
+                  thinkLevel: params.followupRun.run.thinkLevel,
+                  timeoutMs: params.followupRun.run.timeoutMs,
+                  runId,
+                  extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
+                  ownerNumbers: params.followupRun.run.ownerNumbers,
+                  images: params.opts?.images,
+                });
+
+                const llmwsText = result.payloads?.[0]?.text?.trim();
+                if (llmwsText) {
+                  emitAgentEvent({
+                    runId,
+                    stream: "assistant",
+                    data: { text: llmwsText },
+                  });
+                }
+
+                emitAgentEvent({
+                  runId,
+                  stream: "lifecycle",
+                  data: {
+                    phase: "end",
+                    startedAt,
+                    endedAt: Date.now(),
+                  },
+                });
+                lifecycleTerminalEmitted = true;
+
+                return result;
+              } catch (err) {
+                emitAgentEvent({
+                  runId,
+                  stream: "lifecycle",
+                  data: {
+                    phase: "error",
+                    startedAt,
+                    endedAt: Date.now(),
+                    error: String(err),
+                  },
+                });
+                lifecycleTerminalEmitted = true;
+                throw err;
+              } finally {
+                if (!lifecycleTerminalEmitted) {
+                  emitAgentEvent({
+                    runId,
+                    stream: "lifecycle",
+                    data: {
+                      phase: "error",
+                      startedAt,
+                      endedAt: Date.now(),
+                      error: "LLMWS run completed without lifecycle terminal event",
                     },
                   });
                 }

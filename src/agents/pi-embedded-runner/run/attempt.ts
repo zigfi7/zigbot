@@ -30,6 +30,10 @@ import {
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
+import {
+  buildModelCapabilityLines,
+  resolveModelRuntimeCapabilities,
+} from "../../model-capabilities.js";
 import { resolveDefaultModelForAgent } from "../../model-selection.js";
 import {
   isCloudCodeAssistFormatError,
@@ -60,7 +64,7 @@ import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
-import { isAbortError } from "../abort.js";
+import { isRunnerAbortError } from "../abort.js";
 import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import { buildEmbeddedExtensionPaths } from "../extensions.js";
 import { applyExtraParamsToAgent } from "../extra-params.js";
@@ -256,6 +260,14 @@ export async function runEmbeddedAttempt(
           accountId: params.agentAccountId,
         }) ?? [])
       : undefined;
+    const runtimeModelCapabilities = resolveModelRuntimeCapabilities({
+      cfg: params.config,
+      provider: params.provider,
+      model: params.modelId,
+    });
+    if (runtimeModelCapabilities.length > 0) {
+      runtimeCapabilities = [...(runtimeCapabilities ?? []), ...runtimeModelCapabilities];
+    }
     if (runtimeChannel === "telegram" && params.config) {
       const inlineButtonsScope = resolveTelegramInlineButtonsScope({
         cfg: params.config,
@@ -369,6 +381,10 @@ export async function runEmbeddedAttempt(
       sandboxInfo,
       tools,
       modelAliasLines: buildModelAliasLines(params.config),
+      modelCapabilityLines: buildModelCapabilityLines({
+        cfg: params.config,
+        activeModel: { provider: params.provider, model: params.modelId },
+      }),
       userTimezone,
       userTime,
       userTimeFormat,
@@ -832,7 +848,7 @@ export async function runEmbeddedAttempt(
         try {
           await waitForCompactionRetry();
         } catch (err) {
-          if (isAbortError(err)) {
+          if (isRunnerAbortError(err)) {
             if (!promptError) {
               promptError = err;
             }

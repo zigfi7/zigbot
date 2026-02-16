@@ -6,7 +6,7 @@ import {
   resolveSessionAgentId,
   resolveAgentSkillsFilter,
 } from "../../agents/agent-scope.js";
-import { resolveModelRefFromString } from "../../agents/model-selection.js";
+import { resolveModelRefFromStringWithRandom } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { DEFAULT_AGENT_WORKSPACE_DIR, ensureAgentWorkspace } from "../../agents/workspace.js";
 import { type OpenClawConfig, loadConfig } from "../../config/config.js";
@@ -81,8 +81,9 @@ export async function getReplyFromConfig(
   if (opts?.isHeartbeat) {
     const heartbeatRaw = agentCfg?.heartbeat?.model?.trim() ?? "";
     const heartbeatRef = heartbeatRaw
-      ? resolveModelRefFromString({
+      ? resolveModelRefFromStringWithRandom({
           raw: heartbeatRaw,
+          cfg,
           defaultProvider,
           aliasIndex,
         })

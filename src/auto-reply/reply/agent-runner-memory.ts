@@ -6,7 +6,7 @@ import type { GetReplyOptions } from "../types.js";
 import type { FollowupRun } from "./queue.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
-import { isCliProvider } from "../../agents/model-selection.js";
+import { isExternalRunnerProvider } from "../../agents/model-selection.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
@@ -62,7 +62,7 @@ export async function runMemoryFlushIfNeeded(params: {
     memoryFlushSettings &&
     memoryFlushWritable &&
     !params.isHeartbeat &&
-    !isCliProvider(params.followupRun.run.provider, params.cfg) &&
+    !isExternalRunnerProvider(params.followupRun.run.provider, params.cfg) &&
     shouldRunMemoryFlush({
       entry:
         params.sessionEntry ??

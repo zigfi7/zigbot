@@ -21,6 +21,15 @@ export async function getMemorySearchManager(params: {
   agentId: string;
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
+  if (resolved.backend === "zigmem" && resolved.zigmem) {
+    try {
+      const { ZigmemMemoryManager } = await import("./zigmem-manager.js");
+      return { manager: new ZigmemMemoryManager(resolved.zigmem) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { manager: null, error: message };
+    }
+  }
   if (resolved.backend === "qmd" && resolved.qmd) {
     const cacheKey = buildQmdCacheKey(params.agentId, resolved.qmd);
     const cached = QMD_MANAGER_CACHE.get(cacheKey);

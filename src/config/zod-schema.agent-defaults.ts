@@ -19,6 +19,7 @@ export const AgentDefaultsSchema = z
       .object({
         primary: z.string().optional(),
         fallbacks: z.array(z.string()).optional(),
+        randomPool: z.array(z.string()).optional(),
       })
       .strict()
       .optional(),
@@ -35,6 +36,7 @@ export const AgentDefaultsSchema = z
         z
           .object({
             alias: z.string().optional(),
+            capabilities: z.array(z.string()).optional(),
             /** Provider-specific API parameters (e.g., GLM-4.7 thinking mode). */
             params: z.record(z.string(), z.unknown()).optional(),
             /** Enable streaming for this model (default: true, false for Ollama to avoid SDK issue #1205). */
@@ -54,6 +56,61 @@ export const AgentDefaultsSchema = z
     envelopeElapsed: z.union([z.literal("on"), z.literal("off")]).optional(),
     contextTokens: z.number().int().positive().optional(),
     cliBackends: z.record(z.string(), CliBackendSchema).optional(),
+    llmws: z
+      .object({
+        servers: z
+          .array(
+            z.union([
+              z.string(),
+              z
+                .object({
+                  url: z.string(),
+                  capabilities: z.array(z.string()).optional(),
+                })
+                .strict(),
+            ]),
+          )
+          .optional(),
+        server: z.string().optional(),
+        connectTimeoutMs: z.number().int().positive().optional(),
+        readTimeoutMs: z.number().int().positive().optional(),
+        includeHistory: z.boolean().optional(),
+        historyTurns: z.number().int().nonnegative().optional(),
+        historyChars: z.number().int().nonnegative().optional(),
+        config: z
+          .object({
+            maxNewTokens: z.number().int().positive().optional(),
+            temperature: z.number().optional(),
+            topP: z.number().optional(),
+            topK: z.number().int().optional(),
+            repetitionPenalty: z.number().optional(),
+            doSample: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    modelRouting: z
+      .object({
+        enabled: z.boolean().optional(),
+        smallPromptMaxChars: z.number().int().positive().optional(),
+        metaKeywords: z.array(z.string()).optional(),
+        codingKeywords: z.array(z.string()).optional(),
+        pool: z
+          .object({
+            small: z.string().optional(),
+            meta: z.string().optional(),
+            coding: z.string().optional(),
+            vision: z.string().optional(),
+            heavy: z.string().optional(),
+            standard: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     memorySearch: MemorySearchSchema,
     contextPruning: z
       .object({

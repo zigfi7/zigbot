@@ -21,6 +21,7 @@ const ANTHROPIC_MODEL_ALIASES: Record<string, string> = {
   "opus-4.5": "claude-opus-4-5",
   "sonnet-4.5": "claude-sonnet-4-5",
 };
+const RANDOM_MODEL_TOKENS = new Set(["random", "random/random"]);
 
 function normalizeAliasKey(value: string): string {
   return value.trim().toLowerCase();
@@ -57,6 +58,14 @@ export function isCliProvider(provider: string, cfg?: OpenClawConfig): boolean {
   }
   const backends = cfg?.agents?.defaults?.cliBackends ?? {};
   return Object.keys(backends).some((key) => normalizeProviderId(key) === normalized);
+}
+
+export function isLlmwsProvider(provider: string): boolean {
+  return normalizeProviderId(provider) === "llmws";
+}
+
+export function isExternalRunnerProvider(provider: string, cfg?: OpenClawConfig): boolean {
+  return isCliProvider(provider, cfg) || isLlmwsProvider(provider);
 }
 
 function normalizeAnthropicModelId(model: string): string {
@@ -177,6 +186,98 @@ export function resolveModelRefFromString(params: {
   return { ref: parsed };
 }
 
+function isRandomModelToken(raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  return RANDOM_MODEL_TOKENS.has(normalized);
+}
+
+function collectRandomPoolValues(cfg: OpenClawConfig): string[] {
+  const defaultsModel = cfg.agents?.defaults?.model;
+  const listFromRandomPool =
+    defaultsModel && typeof defaultsModel === "object" ? (defaultsModel.randomPool ?? []) : [];
+  if (listFromRandomPool.length > 0) {
+    return listFromRandomPool;
+  }
+
+  const listFromFallbacks =
+    defaultsModel && typeof defaultsModel === "object" ? (defaultsModel.fallbacks ?? []) : [];
+  if (listFromFallbacks.length > 0) {
+    return listFromFallbacks;
+  }
+
+  return Object.keys(cfg.agents?.defaults?.models ?? {});
+}
+
+function chooseRandomModelRef(params: {
+  cfg: OpenClawConfig;
+  defaultProvider: string;
+  aliasIndex: ModelAliasIndex;
+}): ModelRef | null {
+  const candidates: ModelRef[] = [];
+  const seen = new Set<string>();
+  const rawValues = collectRandomPoolValues(params.cfg);
+  for (const rawValue of rawValues) {
+    const trimmed = String(rawValue ?? "").trim();
+    if (!trimmed || isRandomModelToken(trimmed)) {
+      continue;
+    }
+    const resolved = resolveModelRefFromString({
+      raw: trimmed,
+      defaultProvider: params.defaultProvider,
+      aliasIndex: params.aliasIndex,
+    });
+    if (!resolved) {
+      continue;
+    }
+    const key = modelKey(resolved.ref.provider, resolved.ref.model);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    candidates.push(resolved.ref);
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+  const index = Math.floor(Math.random() * candidates.length);
+  return candidates[index] ?? null;
+}
+
+export function resolveModelRefFromStringWithRandom(params: {
+  raw: string;
+  cfg: OpenClawConfig;
+  defaultProvider: string;
+  aliasIndex?: ModelAliasIndex;
+}): { ref: ModelRef; alias?: string } | null {
+  const trimmed = params.raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const aliasIndex =
+    params.aliasIndex ??
+    buildModelAliasIndex({
+      cfg: params.cfg,
+      defaultProvider: params.defaultProvider,
+    });
+  if (isRandomModelToken(trimmed)) {
+    const randomRef = chooseRandomModelRef({
+      cfg: params.cfg,
+      defaultProvider: params.defaultProvider,
+      aliasIndex,
+    });
+    if (!randomRef) {
+      return null;
+    }
+    return { ref: randomRef };
+  }
+  return resolveModelRefFromString({
+    raw: trimmed,
+    defaultProvider: params.defaultProvider,
+    aliasIndex,
+  });
+}
+
 export function resolveConfiguredModelRef(params: {
   cfg: OpenClawConfig;
   defaultProvider: string;
@@ -195,6 +296,21 @@ export function resolveConfiguredModelRef(params: {
       cfg: params.cfg,
       defaultProvider: params.defaultProvider,
     });
+    if (isRandomModelToken(trimmed)) {
+      const resolvedRandom = resolveModelRefFromStringWithRandom({
+        raw: trimmed,
+        cfg: params.cfg,
+        defaultProvider: params.defaultProvider,
+        aliasIndex,
+      });
+      if (resolvedRandom) {
+        return resolvedRandom.ref;
+      }
+      console.warn(
+        '[openclaw] Model "random" requested but no candidates found in agents.defaults.model.randomPool, agents.defaults.model.fallbacks, or agents.defaults.models.',
+      );
+      return { provider: params.defaultProvider, model: params.defaultModel };
+    }
     if (!trimmed.includes("/")) {
       const aliasKey = normalizeAliasKey(trimmed);
       const aliasMatch = aliasIndex.byAlias.get(aliasKey);
@@ -295,7 +411,7 @@ export function buildAllowedModelSet(params: {
     }
     const key = modelKey(parsed.provider, parsed.model);
     const providerKey = normalizeProviderId(parsed.provider);
-    if (isCliProvider(parsed.provider, params.cfg)) {
+    if (isExternalRunnerProvider(parsed.provider, params.cfg)) {
       allowedKeys.add(key);
     } else if (catalogKeys.has(key)) {
       allowedKeys.add(key);
@@ -377,8 +493,9 @@ export function resolveAllowedModelRef(params: {
     cfg: params.cfg,
     defaultProvider: params.defaultProvider,
   });
-  const resolved = resolveModelRefFromString({
+  const resolved = resolveModelRefFromStringWithRandom({
     raw: trimmed,
+    cfg: params.cfg,
     defaultProvider: params.defaultProvider,
     aliasIndex,
   });

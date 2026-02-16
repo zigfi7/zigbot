@@ -14,6 +14,8 @@ import type { MemorySearchConfig } from "./types.tools.js";
 
 export type AgentModelEntryConfig = {
   alias?: string;
+  /** Capability tags used by automatic task routing and prompt hints (e.g. ["small", "meta", "vision"]). */
+  capabilities?: string[];
   /** Provider-specific API parameters (e.g., GLM-4.7 thinking mode). */
   params?: Record<string, unknown>;
   /** Enable streaming for this model (default: true, false for Ollama to avoid SDK issue #1205). */
@@ -23,6 +25,11 @@ export type AgentModelEntryConfig = {
 export type AgentModelListConfig = {
   primary?: string;
   fallbacks?: string[];
+  /**
+   * Optional pool used when primary (or explicit override) is set to "random".
+   * If empty, random selection falls back to `fallbacks`, then configured model keys.
+   */
+  randomPool?: string[];
 };
 
 export type AgentContextPruningConfig = {
@@ -93,6 +100,69 @@ export type CliBackendConfig = {
   serialize?: boolean;
 };
 
+export type LlmwsGenerationConfig = {
+  maxNewTokens?: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  repetitionPenalty?: number;
+  doSample?: boolean;
+};
+
+export type LlmwsServerConfig = {
+  /** Endpoint URL (host:port or ws:// URL). */
+  url: string;
+  /** Optional server capability tags for routing (e.g. ["vision", "small"]). */
+  capabilities?: string[];
+};
+
+export type LlmwsConfig = {
+  /** Ordered endpoint list (host:port/ws:// or objects with capability tags). */
+  servers?: Array<string | LlmwsServerConfig>;
+  /** Fallback single endpoint when servers[] is omitted. */
+  server?: string;
+  /** Per-endpoint connect timeout. */
+  connectTimeoutMs?: number;
+  /** Read timeout while waiting for stream chunks. */
+  readTimeoutMs?: number;
+  /** Include recent transcript turns in each request (default: true). */
+  includeHistory?: boolean;
+  /** Max transcript turns injected when includeHistory is enabled. */
+  historyTurns?: number;
+  /** Max chars injected from transcript history. */
+  historyChars?: number;
+  /** Default inference config sent to LLMWS. */
+  config?: LlmwsGenerationConfig;
+};
+
+export type AgentModelRoutingPoolConfig = {
+  /** Small/cheap model for lightweight tasks. */
+  small?: string;
+  /** Model used for meta-analysis, planning, and evaluation tasks. */
+  meta?: string;
+  /** Model for coding/refactor/debug tasks. */
+  coding?: string;
+  /** Model for image/vision tasks. */
+  vision?: string;
+  /** Model for very long/high-complexity tasks. */
+  heavy?: string;
+  /** Default model for general tasks (fallback inside router). */
+  standard?: string;
+};
+
+export type AgentModelRoutingConfig = {
+  /** Enable automatic pool-based task routing. */
+  enabled?: boolean;
+  /** Max prompt chars to classify as a small task (default: 220). */
+  smallPromptMaxChars?: number;
+  /** Optional keyword overrides for meta-analysis routing. */
+  metaKeywords?: string[];
+  /** Optional keyword overrides for coding routing. */
+  codingKeywords?: string[];
+  /** Named model pool used by the task router. */
+  pool?: AgentModelRoutingPoolConfig;
+};
+
 export type AgentDefaultsConfig = {
   /** Primary model and fallbacks (provider/model). */
   model?: AgentModelListConfig;
@@ -128,6 +198,10 @@ export type AgentDefaultsConfig = {
   contextTokens?: number;
   /** Optional CLI backends for text-only fallback (claude-cli, etc.). */
   cliBackends?: Record<string, CliBackendConfig>;
+  /** Optional native LLMWS backend settings. */
+  llmws?: LlmwsConfig;
+  /** Optional automatic model router (pool-based task classification). */
+  modelRouting?: AgentModelRoutingConfig;
   /** Opt-in: prune old tool results from the LLM context to reduce token usage. */
   contextPruning?: AgentContextPruningConfig;
   /** Compaction tuning and pre-compaction memory flush behavior. */

@@ -2,7 +2,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { setCliSessionId } from "../../agents/cli-session.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
-import { isCliProvider } from "../../agents/model-selection.js";
+import { isExternalRunnerProvider } from "../../agents/model-selection.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../../agents/usage.js";
 import { type SessionEntry, updateSessionStore } from "../../config/sessions.js";
 
@@ -55,7 +55,7 @@ export async function updateSessionStoreAfterAgentRun(params: {
     model: modelUsed,
     contextTokens,
   };
-  if (isCliProvider(providerUsed, cfg)) {
+  if (isExternalRunnerProvider(providerUsed, cfg)) {
     const cliSessionId = result.meta.agentMeta?.sessionId?.trim();
     if (cliSessionId) {
       setCliSessionId(next, providerUsed, cliSessionId);

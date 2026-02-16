@@ -3,8 +3,11 @@ import type { OpenClawConfig } from "../config/config.js";
 import {
   parseModelRef,
   resolveModelRefFromString,
+  resolveModelRefFromStringWithRandom,
   resolveConfiguredModelRef,
   buildModelAliasIndex,
+  isExternalRunnerProvider,
+  isLlmwsProvider,
   normalizeProviderId,
   modelKey,
 } from "./model-selection.js";
@@ -18,6 +21,20 @@ describe("model-selection", () => {
       expect(normalizeProviderId("OpenCode-Zen")).toBe("opencode");
       expect(normalizeProviderId("qwen")).toBe("qwen-portal");
       expect(normalizeProviderId("kimi-code")).toBe("kimi-coding");
+    });
+  });
+
+  describe("external runner providers", () => {
+    it("detects llmws provider id", () => {
+      expect(isLlmwsProvider("llmws")).toBe(true);
+      expect(isLlmwsProvider("LLMWS")).toBe(true);
+      expect(isLlmwsProvider("google")).toBe(false);
+    });
+
+    it("treats llmws as an external runner provider", () => {
+      expect(isExternalRunnerProvider("llmws")).toBe(true);
+      expect(isExternalRunnerProvider("claude-cli")).toBe(true);
+      expect(isExternalRunnerProvider("google")).toBe(false);
     });
   });
 
@@ -146,6 +163,95 @@ describe("model-selection", () => {
         defaultModel: "gpt-4",
       });
       expect(result).toEqual({ provider: "openai", model: "gpt-4" });
+    });
+
+    it('resolves "random" primary from randomPool without favoritism order bias', () => {
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.75);
+      const cfg: Partial<OpenClawConfig> = {
+        agents: {
+          defaults: {
+            model: {
+              primary: "random",
+              randomPool: ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4-5"],
+            },
+          },
+        },
+      };
+
+      const result = resolveConfiguredModelRef({
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "openai",
+        defaultModel: "gpt-4",
+      });
+
+      expect(result).toEqual({
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+      });
+      randomSpy.mockRestore();
+    });
+
+    it('falls back to model.fallbacks when primary is "random" and randomPool is unset', () => {
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.0);
+      const cfg: Partial<OpenClawConfig> = {
+        agents: {
+          defaults: {
+            model: {
+              primary: "random",
+              fallbacks: ["openai/gpt-4.1-mini", "google/gemini-2.5-pro"],
+            },
+          },
+        },
+      };
+
+      const result = resolveConfiguredModelRef({
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "openai",
+        defaultModel: "gpt-4",
+      });
+
+      expect(result).toEqual({
+        provider: "openai",
+        model: "gpt-4.1-mini",
+      });
+      randomSpy.mockRestore();
+    });
+  });
+
+  describe("resolveModelRefFromStringWithRandom", () => {
+    it('resolves "random" from the configured randomPool', () => {
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.2);
+      const cfg: Partial<OpenClawConfig> = {
+        agents: {
+          defaults: {
+            model: {
+              randomPool: ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4-5"],
+            },
+          },
+        },
+      };
+
+      const resolved = resolveModelRefFromStringWithRandom({
+        raw: "random",
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "openai",
+      });
+
+      expect(resolved?.ref).toEqual({
+        provider: "google",
+        model: "gemini-2.5-pro",
+      });
+      randomSpy.mockRestore();
+    });
+
+    it('returns null for "random" when no pool/fallback/model keys are configured', () => {
+      const cfg: Partial<OpenClawConfig> = {};
+      const resolved = resolveModelRefFromStringWithRandom({
+        raw: "random",
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "openai",
+      });
+      expect(resolved).toBeNull();
     });
   });
 });

@@ -12,17 +12,18 @@ import {
 import { runCliAgent } from "../../agents/cli-runner.js";
 import { getCliSessionId, setCliSessionId } from "../../agents/cli-session.js";
 import { lookupContextTokens } from "../../agents/context.js";
-import {
-  formatUserTime,
-  resolveUserTimeFormat,
-  resolveUserTimezone,
-} from "../../agents/date-time.js";
+import { resolveCronStyleNow } from "../../agents/current-time.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../agents/defaults.js";
+import { runLlmwsAgent } from "../../agents/llmws-runner.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
+import { resolvePooledModelRoute } from "../../agents/model-routing.js";
 import {
   getModelRefStatus,
+  isExternalRunnerProvider,
   isCliProvider,
+  isLlmwsProvider,
+  normalizeProviderId,
   resolveAllowedModelRef,
   resolveConfiguredModelRef,
   resolveHooksGmailModel,
@@ -210,6 +211,23 @@ export async function runCronIsolatedAgentTurn(params: {
     provider = resolvedOverride.ref.provider;
     model = resolvedOverride.ref.model;
   }
+  const routedModel = resolvePooledModelRoute({
+    cfg: cfgWithAgentDefaults,
+    agentId,
+    prompt: params.message,
+    currentProvider: provider,
+    currentModel: model,
+    imagesCount: 0,
+    allowCurrentModelOverride:
+      !modelOverride &&
+      !hooksGmailModelRef &&
+      normalizeProviderId(provider) === normalizeProviderId(resolvedDefault.provider) &&
+      model.trim() === resolvedDefault.model.trim(),
+  });
+  if (routedModel) {
+    provider = routedModel.provider;
+    model = routedModel.model;
+  }
   const now = Date.now();
   const cronSession = resolveCronSession({
     cfg: params.cfg,
@@ -288,11 +306,7 @@ export async function runCronIsolatedAgentTurn(params: {
     to: deliveryPlan.to,
   });
 
-  const userTimezone = resolveUserTimezone(params.cfg.agents?.defaults?.userTimezone);
-  const userTimeFormat = resolveUserTimeFormat(params.cfg.agents?.defaults?.timeFormat);
-  const formattedTime =
-    formatUserTime(new Date(now), userTimezone, userTimeFormat) ?? new Date(now).toISOString();
-  const timeLine = `Current time: ${formattedTime} (${userTimezone})`;
+  const { formattedTime, timeLine } = resolveCronStyleNow(params.cfg, now);
   const base = `[cron:${params.job.id} ${params.job.name}] ${params.message}`.trim();
 
   // SECURITY: Wrap external hook content with security boundaries to prevent prompt injection
@@ -401,6 +415,24 @@ export async function runCronIsolatedAgentTurn(params: {
             cliSessionId,
           });
         }
+        if (isLlmwsProvider(providerOverride)) {
+          const remoteSessionId = getCliSessionId(cronSession.sessionEntry, providerOverride);
+          return runLlmwsAgent({
+            sessionId: cronSession.sessionEntry.sessionId,
+            remoteSessionId,
+            sessionKey: agentSessionKey,
+            agentId,
+            sessionFile,
+            workspaceDir,
+            config: cfgWithAgentDefaults,
+            prompt: commandBody,
+            provider: providerOverride,
+            model: modelOverride,
+            thinkLevel,
+            timeoutMs,
+            runId: cronSession.sessionEntry.sessionId,
+          });
+        }
         return runEmbeddedPiAgent({
           sessionId: cronSession.sessionEntry.sessionId,
           sessionKey: agentSessionKey,
@@ -445,7 +477,7 @@ export async function runCronIsolatedAgentTurn(params: {
     cronSession.sessionEntry.modelProvider = providerUsed;
     cronSession.sessionEntry.model = modelUsed;
     cronSession.sessionEntry.contextTokens = contextTokens;
-    if (isCliProvider(providerUsed, cfgWithAgentDefaults)) {
+    if (isExternalRunnerProvider(providerUsed, cfgWithAgentDefaults)) {
       const cliSessionId = runResult.meta.agentMeta?.sessionId?.trim();
       if (cliSessionId) {
         setCliSessionId(cronSession.sessionEntry, providerUsed, cliSessionId);

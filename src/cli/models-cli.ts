@@ -9,6 +9,7 @@ import {
   modelsAuthOrderClearCommand,
   modelsAuthOrderGetCommand,
   modelsAuthOrderSetCommand,
+  modelsAuthPasteApiKeyCommand,
   modelsAuthPasteTokenCommand,
   modelsAuthSetupTokenCommand,
   modelsFallbacksAddCommand,
@@ -355,6 +356,23 @@ export function registerModelsCli(program: Command) {
             provider: opts.provider as string | undefined,
             profileId: opts.profileId as string | undefined,
             expiresIn: opts.expiresIn as string | undefined,
+          },
+          defaultRuntime,
+        );
+      });
+    });
+
+  auth
+    .command("paste-api-key")
+    .description("Paste an API key into auth-profiles.json and update config")
+    .requiredOption("--provider <name>", "Provider id (e.g. google)")
+    .option("--profile-id <id>", "Auth profile id (default: <provider>:default)")
+    .action(async (opts) => {
+      await runModelsCommand(async () => {
+        await modelsAuthPasteApiKeyCommand(
+          {
+            provider: opts.provider as string | undefined,
+            profileId: opts.profileId as string | undefined,
           },
           defaultRuntime,
         );

@@ -10,11 +10,15 @@ import type { CliBackendConfig } from "../../config/types.js";
 import type { EmbeddedContextFile } from "../pi-embedded-helpers.js";
 import { runExec } from "../../process/exec.js";
 import { buildTtsSystemPromptHint } from "../../tts/tts.js";
-import { escapeRegExp } from "../../utils.js";
+import { escapeRegExp, isRecord } from "../../utils.js";
+import {
+  buildModelCapabilityLines,
+  resolveModelRuntimeCapabilities,
+} from "../model-capabilities.js";
 import { resolveDefaultModelForAgent } from "../model-selection.js";
 import { detectRuntimeShell } from "../shell-utils.js";
 import { buildSystemPromptParams } from "../system-prompt-params.js";
-import { buildAgentSystemPrompt } from "../system-prompt.js";
+import { buildAgentSystemPrompt, type PromptMode } from "../system-prompt.js";
 
 const CLI_RUN_QUEUE = new Map<string, Promise<unknown>>();
 
@@ -194,6 +198,23 @@ function buildModelAliasLines(cfg?: OpenClawConfig) {
     .map((entry) => `- ${entry.alias}: ${entry.model}`);
 }
 
+function splitModelDisplay(modelDisplay: string): { provider: string; model: string } | null {
+  const trimmed = modelDisplay.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
+    return null;
+  }
+  const provider = trimmed.slice(0, slashIndex).trim();
+  const model = trimmed.slice(slashIndex + 1).trim();
+  if (!provider || !model) {
+    return null;
+  }
+  return { provider, model };
+}
+
 export function buildSystemPrompt(params: {
   workspaceDir: string;
   config?: OpenClawConfig;
@@ -206,7 +227,17 @@ export function buildSystemPrompt(params: {
   contextFiles?: EmbeddedContextFile[];
   modelDisplay: string;
   agentId?: string;
+  /** Optional system prompt mode override (used for external runners like LLMWS). */
+  promptMode?: PromptMode;
 }) {
+  const activeModel = splitModelDisplay(params.modelDisplay);
+  const runtimeModelCapabilities = activeModel
+    ? resolveModelRuntimeCapabilities({
+        cfg: params.config,
+        provider: activeModel.provider,
+        model: activeModel.model,
+      })
+    : [];
   const defaultModelRef = resolveDefaultModelForAgent({
     cfg: params.config ?? {},
     agentId: params.agentId,
@@ -225,6 +256,7 @@ export function buildSystemPrompt(params: {
       model: params.modelDisplay,
       defaultModel: defaultModelLabel,
       shell: detectRuntimeShell(),
+      capabilities: runtimeModelCapabilities,
     },
   });
   const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
@@ -239,12 +271,17 @@ export function buildSystemPrompt(params: {
     runtimeInfo,
     toolNames: params.tools.map((tool) => tool.name),
     modelAliasLines: buildModelAliasLines(params.config),
+    modelCapabilityLines: buildModelCapabilityLines({
+      cfg: params.config,
+      activeModel: activeModel ?? undefined,
+    }),
     userTimezone,
     userTime,
     userTimeFormat,
     contextFiles: params.contextFiles,
     ttsHint,
     memoryCitationsMode: params.config?.memory?.citations,
+    promptMode: params.promptMode,
   });
 }
 
@@ -278,10 +315,6 @@ function toUsage(raw: Record<string, unknown>): CliUsage | undefined {
     return undefined;
   }
   return { input, output, cacheRead, cacheWrite, total };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function collectText(value: unknown): string {

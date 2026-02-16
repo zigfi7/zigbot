@@ -43,6 +43,7 @@ export function buildEmbeddedSystemPrompt(params: {
   sandboxInfo?: EmbeddedSandboxInfo;
   tools: AgentTool[];
   modelAliasLines: string[];
+  modelCapabilityLines?: string[];
   userTimezone: string;
   userTime?: string;
   userTimeFormat?: ResolvedTimeFormat;
@@ -69,6 +70,7 @@ export function buildEmbeddedSystemPrompt(params: {
     toolNames: params.tools.map((tool) => tool.name),
     toolSummaries: buildToolSummaryMap(params.tools),
     modelAliasLines: params.modelAliasLines,
+    modelCapabilityLines: params.modelCapabilityLines,
     userTimezone: params.userTimezone,
     userTime: params.userTime,
     userTimeFormat: params.userTimeFormat,

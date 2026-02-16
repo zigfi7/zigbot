@@ -6,6 +6,7 @@ import type {
   MemoryCitationsMode,
   MemoryQmdConfig,
   MemoryQmdIndexPath,
+  MemoryZigmemConfig,
 } from "../config/types.memory.js";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
@@ -16,6 +17,17 @@ export type ResolvedMemoryBackendConfig = {
   backend: MemoryBackend;
   citations: MemoryCitationsMode;
   qmd?: ResolvedQmdConfig;
+  zigmem?: ResolvedZigmemConfig;
+};
+
+export type ResolvedZigmemConfig = {
+  baseUrl: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  timeoutMs: number;
+  mode: "lexical" | "semantic" | "hybrid";
+  maxResults: number;
+  pathPrefix: string;
 };
 
 export type ResolvedQmdCollection = {
@@ -61,6 +73,11 @@ export type ResolvedQmdConfig = {
 
 const DEFAULT_BACKEND: MemoryBackend = "builtin";
 const DEFAULT_CITATIONS: MemoryCitationsMode = "auto";
+const DEFAULT_ZIGMEM_BASE_URL = "http://127.0.0.1:8000";
+const DEFAULT_ZIGMEM_TIMEOUT_MS = 8_000;
+const DEFAULT_ZIGMEM_MODE: ResolvedZigmemConfig["mode"] = "hybrid";
+const DEFAULT_ZIGMEM_MAX_RESULTS = 6;
+const DEFAULT_ZIGMEM_PATH_PREFIX = "zigmem";
 const DEFAULT_QMD_INTERVAL = "5m";
 const DEFAULT_QMD_DEBOUNCE_MS = 15_000;
 const DEFAULT_QMD_TIMEOUT_MS = 4_000;
@@ -114,6 +131,43 @@ function resolvePath(raw: string, workspaceDir: string): string {
     return path.normalize(resolveUserPath(trimmed));
   }
   return path.normalize(path.resolve(workspaceDir, trimmed));
+}
+
+function normalizeBaseUrl(raw: string | undefined): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return DEFAULT_ZIGMEM_BASE_URL;
+  }
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function resolveZigmemConfig(raw?: MemoryZigmemConfig): ResolvedZigmemConfig {
+  const timeoutMs =
+    typeof raw?.timeoutMs === "number" && Number.isFinite(raw.timeoutMs) && raw.timeoutMs > 0
+      ? Math.floor(raw.timeoutMs)
+      : DEFAULT_ZIGMEM_TIMEOUT_MS;
+  const mode =
+    raw?.mode === "lexical" || raw?.mode === "semantic" || raw?.mode === "hybrid"
+      ? raw.mode
+      : DEFAULT_ZIGMEM_MODE;
+  const maxResults =
+    typeof raw?.maxResults === "number" && Number.isFinite(raw.maxResults) && raw.maxResults > 0
+      ? Math.max(1, Math.floor(raw.maxResults))
+      : DEFAULT_ZIGMEM_MAX_RESULTS;
+  const pathPrefix = raw?.pathPrefix?.trim() || DEFAULT_ZIGMEM_PATH_PREFIX;
+  const apiKey = raw?.apiKey?.trim() || undefined;
+  const headers =
+    raw?.headers && Object.keys(raw.headers).length > 0 ? { ...raw.headers } : undefined;
+
+  return {
+    baseUrl: normalizeBaseUrl(raw?.baseUrl),
+    apiKey,
+    headers,
+    timeoutMs,
+    mode,
+    maxResults,
+    pathPrefix,
+  };
 }
 
 function resolveIntervalMs(raw: string | undefined): number {
@@ -247,6 +301,13 @@ export function resolveMemoryBackendConfig(params: {
 }): ResolvedMemoryBackendConfig {
   const backend = params.cfg.memory?.backend ?? DEFAULT_BACKEND;
   const citations = params.cfg.memory?.citations ?? DEFAULT_CITATIONS;
+  if (backend === "zigmem") {
+    return {
+      backend: "zigmem",
+      citations,
+      zigmem: resolveZigmemConfig(params.cfg.memory?.zigmem),
+    };
+  }
   if (backend !== "qmd") {
     return { backend: "builtin", citations };
   }

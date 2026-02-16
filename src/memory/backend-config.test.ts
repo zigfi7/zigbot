@@ -13,6 +13,53 @@ describe("resolveMemoryBackendConfig", () => {
     expect(resolved.qmd).toBeUndefined();
   });
 
+  it("resolves zigmem backend defaults", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "zigmem",
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("zigmem");
+    expect(resolved.zigmem).toMatchObject({
+      baseUrl: "http://127.0.0.1:8000",
+      timeoutMs: 8000,
+      mode: "hybrid",
+      maxResults: 6,
+      pathPrefix: "zigmem",
+    });
+  });
+
+  it("resolves zigmem backend overrides", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "zigmem",
+        zigmem: {
+          baseUrl: "http://127.0.0.1:9000/",
+          apiKey: "test-key",
+          headers: { "x-tenant": "alpha" },
+          timeoutMs: 15000,
+          mode: "semantic",
+          maxResults: 12,
+          pathPrefix: "mem",
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("zigmem");
+    expect(resolved.zigmem).toMatchObject({
+      baseUrl: "http://127.0.0.1:9000",
+      apiKey: "test-key",
+      headers: { "x-tenant": "alpha" },
+      timeoutMs: 15000,
+      mode: "semantic",
+      maxResults: 12,
+      pathPrefix: "mem",
+    });
+  });
+
   it("resolves qmd backend with default collections", () => {
     const cfg = {
       agents: { defaults: { workspace: "/tmp/memory-test" } },

@@ -412,6 +412,7 @@ export function resolveModelDirectiveSelection(params: {
 
   const rawTrimmed = raw.trim();
   const rawLower = rawTrimmed.toLowerCase();
+  const isRandomDirective = rawLower === "random" || rawLower === "random/random";
 
   const pickAliasForKey = (provider: string, model: string): string | undefined =>
     aliasIndex.byKey.get(modelKey(provider, model))?.[0];
@@ -425,6 +426,34 @@ export function resolveModelDirectiveSelection(params: {
       ...(alias ? { alias } : undefined),
     };
   };
+
+  if (isRandomDirective) {
+    const randomCandidates: Array<{ provider: string; model: string }> = [];
+    for (const key of allowedModelKeys) {
+      const slash = key.indexOf("/");
+      if (slash <= 0) {
+        continue;
+      }
+      const provider = normalizeProviderId(key.slice(0, slash));
+      const model = key.slice(slash + 1).trim();
+      if (!provider || !model) {
+        continue;
+      }
+      if (provider === "random" && model === "random") {
+        continue;
+      }
+      randomCandidates.push({ provider, model });
+    }
+    if (randomCandidates.length === 0) {
+      return { error: "No models available for random selection." };
+    }
+    const index = Math.floor(Math.random() * randomCandidates.length);
+    const selected = randomCandidates[index];
+    if (!selected) {
+      return { error: "No models available for random selection." };
+    }
+    return { selection: buildSelection(selected.provider, selected.model) };
+  }
 
   const resolveFuzzy = (params: {
     provider?: string;

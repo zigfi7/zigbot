@@ -82,11 +82,24 @@ const MemoryQmdSchema = z
   })
   .strict();
 
+const MemoryZigmemSchema = z
+  .object({
+    baseUrl: z.string().optional(),
+    apiKey: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    mode: z.union([z.literal("lexical"), z.literal("semantic"), z.literal("hybrid")]).optional(),
+    maxResults: z.number().int().positive().optional(),
+    pathPrefix: z.string().optional(),
+  })
+  .strict();
+
 const MemorySchema = z
   .object({
-    backend: z.union([z.literal("builtin"), z.literal("qmd")]).optional(),
+    backend: z.union([z.literal("builtin"), z.literal("qmd"), z.literal("zigmem")]).optional(),
     citations: z.union([z.literal("auto"), z.literal("on"), z.literal("off")]).optional(),
     qmd: MemoryQmdSchema.optional(),
+    zigmem: MemoryZigmemSchema.optional(),
   })
   .strict()
   .optional();
@@ -292,6 +305,7 @@ export const OpenClawSchema = z
         enabled: z.boolean().optional(),
         store: z.string().optional(),
         maxConcurrentRuns: z.number().int().positive().optional(),
+        sessionRetention: z.union([z.string(), z.literal(false)]).optional(),
       })
       .strict()
       .optional(),
@@ -300,6 +314,7 @@ export const OpenClawSchema = z
         enabled: z.boolean().optional(),
         path: z.string().optional(),
         token: z.string().optional(),
+        allowedAgentIds: z.array(z.string()).optional(),
         maxBodyBytes: z.number().int().positive().optional(),
         presets: z.array(z.string()).optional(),
         transformsDir: z.string().optional(),

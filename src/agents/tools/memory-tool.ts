@@ -1,11 +1,13 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
+import type { ResolvedZigmemConfig } from "../../memory/backend-config.js";
 import type { MemorySearchResult } from "../../memory/types.js";
 import type { AnyAgentTool } from "./common.js";
 import { resolveMemoryBackendConfig } from "../../memory/backend-config.js";
 import { getMemorySearchManager } from "../../memory/index.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
+import { isRecord } from "../../utils.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { resolveMemorySearchConfig } from "../memory-search.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
@@ -20,6 +22,12 @@ const MemoryGetSchema = Type.Object({
   path: Type.String(),
   from: Type.Optional(Type.Number()),
   lines: Type.Optional(Type.Number()),
+});
+
+const MemorySaveSchema = Type.Object({
+  text: Type.String(),
+  id: Type.Optional(Type.String()),
+  metadata: Type.Optional(Type.Record(Type.String(), Type.String())),
 });
 
 export function createMemorySearchTool(options: {
@@ -134,6 +142,63 @@ export function createMemoryGetTool(options: {
   };
 }
 
+export function createMemorySaveTool(options: {
+  config?: OpenClawConfig;
+  agentSessionKey?: string;
+}): AnyAgentTool | null {
+  const cfg = options.config;
+  if (!cfg) {
+    return null;
+  }
+  const agentId = resolveSessionAgentId({
+    sessionKey: options.agentSessionKey,
+    config: cfg,
+  });
+  if (!resolveMemorySearchConfig(cfg, agentId)) {
+    return null;
+  }
+
+  return {
+    label: "Memory Save",
+    name: "memory_save",
+    description:
+      "Save a durable memory entry to the configured memory backend (ZigMem when enabled). Keep entries short, factual, and non-sensitive.",
+    parameters: MemorySaveSchema,
+    execute: async (_toolCallId, params) => {
+      const text = readStringParam(params, "text", { required: true, label: "text" });
+      const id = readStringParam(params, "id");
+      const rawMetadata = params.metadata;
+      const metadata = normalizeMetadata(rawMetadata);
+
+      const resolved = resolveMemoryBackendConfig({ cfg, agentId });
+      if (resolved.backend !== "zigmem" || !resolved.zigmem) {
+        return jsonResult({
+          ok: false,
+          disabled: true,
+          error: `memory_save is only supported for memory.backend="zigmem" (current backend: ${resolved.backend})`,
+        });
+      }
+
+      try {
+        const payload = {
+          ...(id ? { id } : {}),
+          text,
+          ...(metadata ? { metadata } : {}),
+        };
+        const response = await requestZigmemJson(resolved.zigmem, "/save", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        return jsonResult({ ok: true, response });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return jsonResult({ ok: false, error: message });
+      }
+    },
+  };
+}
+
 function resolveMemoryCitationsMode(cfg: OpenClawConfig): MemoryCitationsMode {
   const mode = cfg.memory?.citations;
   if (mode === "on" || mode === "off" || mode === "auto") {
@@ -215,4 +280,77 @@ function deriveChatTypeFromSessionKey(sessionKey?: string): "direct" | "group" |
     return "group";
   }
   return "direct";
+}
+
+function normalizeMetadata(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const k = key.trim();
+    if (!k || typeof entry !== "string") {
+      continue;
+    }
+    const v = entry.trim();
+    if (!v) {
+      continue;
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+async function requestZigmemJson(
+  config: ResolvedZigmemConfig,
+  path: string,
+  init: RequestInit,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    ...config.headers,
+  };
+  if (config.apiKey) {
+    headers.authorization = `Bearer ${config.apiKey}`;
+  }
+  try {
+    const url = `${config.baseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        ...headers,
+        ...init.headers,
+      },
+      signal: controller.signal,
+    });
+
+    const raw = await response.text();
+    let parsed: unknown = {};
+    if (raw.trim()) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(`zigmem invalid JSON (${response.status})`);
+      }
+    }
+    if (!response.ok) {
+      const detail = isRecord(parsed) && typeof parsed.detail === "string" ? parsed.detail : "";
+      throw new Error(
+        `zigmem request failed (${response.status})${detail ? `: ${detail.trim()}` : ""}`,
+      );
+    }
+    return parsed;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes("aborted")) {
+      throw new Error(`zigmem request timed out after ${config.timeoutMs}ms`, {
+        cause: err,
+      });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }

@@ -241,6 +241,22 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("- Opus: anthropic/claude-opus-4-5");
   });
 
+  it("includes model/server capabilities guidance when capability lines are provided", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      modelCapabilityLines: [
+        "- llmws/qwen-8b | caps=small,coding | server=ws://127.0.0.1:8765[fast]",
+      ],
+    });
+
+    expect(prompt).toContain("## Model/Server Capabilities");
+    expect(prompt).toContain(
+      "Use this list when choosing model overrides or sub-agents for a task.",
+    );
+    expect(prompt).toContain("session_status(model=<alias|provider/model>)");
+    expect(prompt).toContain("- llmws/qwen-8b | caps=small,coding");
+  });
+
   it("adds ClaudeBot self-update guidance when gateway tool is available", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
@@ -393,6 +409,24 @@ describe("buildAgentSystemPrompt", () => {
     expect(line).toContain("channel=telegram");
     expect(line).toContain("capabilities=inlineButtons");
     expect(line).toContain("thinking=low");
+  });
+
+  it("builds runtime line with capabilities even when no channel is set", () => {
+    const line = buildRuntimeLine(
+      {
+        host: "host",
+        os: "macOS",
+        arch: "arm64",
+        node: "v20",
+        model: "llmws/qwen-8b",
+      },
+      undefined,
+      ["coding", "small"],
+      "off",
+    );
+
+    expect(line).toContain("capabilities=coding,small");
+    expect(line).not.toContain("channel=");
   });
 
   it("describes sandboxed runtime and elevated when allowed", () => {
